@@ -100,14 +100,18 @@ public class TileView extends ScalingScrollView implements
     // use FixedSizeViewGroup as a simple, optimized layering scheme
     // by calling it during construction, no other views will be allowed
     // (unless the user hacks intended behavior by removing all views or by index)
-    mContainer = new FixedSizeViewGroup(context);
+    mContainer = new FixedSizeViewGroup(getContext());
     // we'll draw bitmaps to this view
     mTilingBitmapView = new TilingBitmapView(this);
     mContainer.addView(mTilingBitmapView);
     addView(mContainer);
   }
 
-  // TODO: override addViews?
+//  @Override
+//  public void addView(View child, int index, ViewGroup.LayoutParams params) {
+//    Log.d("TV", "addView called");
+//    super.addView(child);
+//  }
 
   // public
 
@@ -225,7 +229,6 @@ public class TileView extends ScalingScrollView implements
       mTilesVisibleInViewport.clear();
       determineCurrentDetail();
     }
-    updateScaledViewport();
     updateViewportAndComputeTilesThrottled();
     // if this is setDirty or postInvalidate, things get wonky
     mTilingBitmapView.invalidate();
@@ -253,6 +256,7 @@ public class TileView extends ScalingScrollView implements
     Detail exactMatch = mDetailList.get(mZoom);
     if (exactMatch != null) {
       mCurrentDetail = exactMatch;
+      mImageSample = 1;
       return;
     }
     // it's not bigger than what we have defined, but we don't have an exact match, start at the requested zoom and work back
@@ -440,8 +444,11 @@ public class TileView extends ScalingScrollView implements
     if (mDetailList.isEmpty()) {
       throw new IllegalStateException("TileView requires at least one defined detail level");
     }
-    if (mTilingBitmapView.getLayoutParams().width == 0 || mTilingBitmapView.getLayoutParams().height == 0) {
+    if (!mContainer.hasValidDimensions()) {
       throw new IllegalStateException("TileView requires height and width be provided via Builder.setSize");
+    }
+    if (mIsPrepared) {
+      return;
     }
     mIsPrepared = true;
     attemptOnReady();
@@ -521,6 +528,10 @@ public class TileView extends ScalingScrollView implements
       requestLayout();
     }
 
+    public boolean hasValidDimensions() {
+      return mWidth > 0 && mHeight > 0;
+    }
+
     @Override
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
       for (int i = 0; i < getChildCount(); i++) {
@@ -544,11 +555,8 @@ public class TileView extends ScalingScrollView implements
     private TileView mTileView;
     private StreamProvider mStreamProvider;
 
-    private Bitmap.Config mConfig = Bitmap.Config.RGB_565;
-    private int mTileSize = 256;
     private int mMemoryCacheSize = (int) ((Runtime.getRuntime().maxMemory() / 1024) / 4);
     private int mDiskCacheSize = 1024 * 100;
-    private DiskCachePolicy mDiskCachePolicy = DiskCachePolicy.CACHE_PATCHES;
 
     public Builder(TileView tileView) {
       mTileView = tileView;
@@ -593,17 +601,17 @@ public class TileView extends ScalingScrollView implements
     }
 
     public Builder setBitmapConfig(Bitmap.Config config) {
-      mConfig = config;
+      mTileView.mBitmapConfig = config;
       return this;
     }
 
     public Builder setTileSize(int tileSize) {
-      mTileSize = tileSize;
+      mTileView.mTileSize = tileSize;
       return this;
     }
 
     public Builder setDiskCachePolicity(DiskCachePolicy policy) {
-      mDiskCachePolicy = policy;
+      mTileView.mDiskCachePolicy = policy;
       return this;
     }
 
@@ -628,27 +636,17 @@ public class TileView extends ScalingScrollView implements
       return this;
     }
 
-    // getters
-
-    private StreamProvider getStreamProvider() {
-      if (mStreamProvider == null) {
-        mStreamProvider = new StreamProviderAssets();
-      }
-      return mStreamProvider;
-    }
-
     public TileView build() {
-      mTileView.mTileSize = mTileSize;
-      mTileView.mBitmapConfig = mConfig;
       // if the user provided a custom provider, use that, otherwise default to assets
-      mTileView.mStreamProvider = getStreamProvider();
+      mTileView.mStreamProvider = (mStreamProvider == null)
+          ? new StreamProviderAssets()
+          : mStreamProvider;
       // use memory cache instance for both memory cache and bitmap pool.  maybe allows these to be set in the future
       MemoryCache memoryCache = new MemoryCache(mMemoryCacheSize);
       mTileView.mMemoryCache = memoryCache;
       mTileView.mBitmapPool = memoryCache;
-      mTileView.mDiskCachePolicy = mDiskCachePolicy;
       // if the policy is to cache something and the size is not 0, try to create a disk cache
-      if (mDiskCachePolicy != DiskCachePolicy.CACHE_NONE && mDiskCacheSize > 0) {
+      if (mTileView.mDiskCachePolicy != DiskCachePolicy.CACHE_NONE && mDiskCacheSize > 0) {
         try {
           // TODO: async?
           mTileView.mDiskCache = new DiskCache(mTileView.getContext(), mDiskCacheSize);
